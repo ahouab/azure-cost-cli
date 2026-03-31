@@ -1,3 +1,5 @@
+﻿using AzureCostCli.Commands;
+using AzureCostCli.Commands.Assist;
 ﻿using System.ComponentModel;
 using AzureCostCli.Commands;
 using AzureCostCli.Commands.AccumulatedCost;
@@ -11,8 +13,10 @@ using AzureCostCli.Commands.Regions;
 using AzureCostCli.Commands.WhatIf;
 using AzureCostCli.CostApi;
 using AzureCostCli.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using AzureCostCli.Infrastructure.TypeConvertors;
 using Microsoft.Extensions.DependencyInjection;
+using OpenAI.GPT3.Extensions;
 using Spectre.Console.Cli;
 
 // Setup the DI
@@ -39,7 +43,13 @@ registrations.AddHttpClient("RegionsApi", client =>
 }).AddPolicyHandler(PollyPolicyExtensions.GetRetryAfterPolicy());
 
 
+var configuration = new ConfigurationManager();
+
+configuration.AddEnvironmentVariables();
+configuration.AddUserSecrets<Program>();
+registrations.AddScoped<IConfiguration>(_ => configuration);
 registrations.AddTransient<ICostRetriever, AzureCostApiRetriever>();
+registrations.AddOpenAIService(); // You do need to have the key in your user secrets or environment variables
 registrations.AddTransient<IPriceRetriever, AzurePriceRetriever>();
 registrations.AddTransient<IRegionsRetriever, AzureRegionsRetriever>();
 
@@ -107,6 +117,9 @@ app.Configure(config =>
   config.AddCommand<RegionsCommand>("regions")
     .WithDescription("Get the available Azure regions.");
 
+  
+  config.AddCommand<AssistCommand>("assist")
+    .WithDescription("AI Assist over your Azure cost.");
   
   config.ValidateExamples();
 });
