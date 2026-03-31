@@ -1,15 +1,14 @@
 using System.Diagnostics;
 using System.Text.Json;
-using AzureCostCli.Commands.ShowCommand;
-using AzureCostCli.Commands.ShowCommand.OutputFormatters;
 using AzureCostCli.CostApi;
 using AzureCostCli.Infrastructure;
+using AzureCostCli.OutputFormatters;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace AzureCostCli.Commands.CostByResource;
 
-public class CostByResourceCommand: AsyncCommand<CostByResourceSettings>
+public class CostByResourceCommand : AsyncCommand<CostByResourceSettings>
 {
     private readonly ICostRetriever _costRetriever;
 
@@ -18,7 +17,7 @@ public class CostByResourceCommand: AsyncCommand<CostByResourceSettings>
     public CostByResourceCommand(ICostRetriever costRetriever)
     {
         _costRetriever = costRetriever;
-        
+
         // Add the output formatters
         _outputFormatters.Add(OutputFormat.Console, new ConsoleOutputFormatter());
         _outputFormatters.Add(OutputFormat.Json, new JsonOutputFormatter());
@@ -57,24 +56,25 @@ public class CostByResourceCommand: AsyncCommand<CostByResourceSettings>
         // Show version
         if (settings.Debug)
             AnsiConsole.WriteLine($"Version: {typeof(CostByResourceCommand).Assembly.GetName().Version}");
-        
-      
+
+
         // Get the subscription ID from the settings
         var subscriptionId = settings.Subscription;
 
-        if (subscriptionId == Guid.Empty)
+        if (subscriptionId.GetValueOrDefault() == Guid.Empty)
         {
             // Get the subscription ID from the Azure CLI
             try
             {
                 if (settings.Debug)
-                    AnsiConsole.WriteLine("No subscription ID specified. Trying to retrieve the default subscription ID from Azure CLI.");
-                
+                    AnsiConsole.WriteLine(
+                        "No subscription ID specified. Trying to retrieve the default subscription ID from Azure CLI.");
+
                 subscriptionId = Guid.Parse(AzCommand.GetDefaultAzureSubscriptionId());
-                
+
                 if (settings.Debug)
                     AnsiConsole.WriteLine($"Default subscription ID retrieved from az cli: {subscriptionId}");
-                
+
                 settings.Subscription = subscriptionId;
             }
             catch (Exception e)
@@ -86,17 +86,25 @@ public class CostByResourceCommand: AsyncCommand<CostByResourceSettings>
         }
 
         // Fetch the costs from the Azure Cost Management API
-        var resources = await _costRetriever.RetrieveCostForResources(settings.Debug, subscriptionId, settings.Timeframe,
-            settings.From, settings.To);
+        IEnumerable<CostResourceItem> resources = new List<CostResourceItem>();
 
+        await AnsiConsole.Status()
+            .StartAsync("Fetching cost data for resources...", async ctx =>
+            {
+                resources = await _costRetriever.RetrieveCostForResources(
+                    settings.Debug,
+                    settings.GetScope, settings.Filter,
+                    settings.Metric,
+                    settings.ExcludeMeterDetails,
+                    settings.Timeframe,
+                    settings.From,
+                    settings.To);
+            });
 
-      
         // Write the output
         await _outputFormatters[settings.Output]
             .WriteCostByResource(settings, resources);
 
         return 0;
     }
-    
-    
 }

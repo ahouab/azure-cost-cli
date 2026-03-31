@@ -1,9 +1,15 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Build, Pack and Release on Tag
 
 on:
   push:
     tags:
       - '*'
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+      
 
 permissions:
   contents: write
@@ -12,14 +18,18 @@ permissions:
 jobs:
   build-pack-release:
     runs-on: ubuntu-latest
+    if: |
+      (!startsWith(github.event.head_commit.message, 'skip-ci') 
+      && !startsWith(github.event.head_commit.message, 'chore:'))
+      || startsWith(github.ref, 'refs/tags/')
     defaults:
       run:
         working-directory: ./src
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - uses: actions/setup-dotnet@v3
+    - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
           6.0.x
@@ -33,8 +43,8 @@ jobs:
 
     - name: Build and Pack
       run: |
-        dotnet build --configuration Release
-        dotnet pack --configuration Release /p:PackageVersion=$TAG_NAME --output nupkgs
+        dotnet build --configuration Release /p:Version=$TAG_NAME /p:AssemblyVersion=$TAG_NAME /p:FileVersion=$TAG_NAME
+        dotnet pack --configuration Release /p:PackageVersion=$TAG_NAME /p:Version=$TAG_NAME /p:AssemblyVersion=$TAG_NAME /p:FileVersion=$TAG_NAME --output nupkgs
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v3

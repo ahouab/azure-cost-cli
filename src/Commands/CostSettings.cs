@@ -3,11 +3,30 @@ using Spectre.Console.Cli;
 
 namespace AzureCostCli.Commands;
 
-public class CostSettings : LogCommandSettings
+public interface ICostSettings
+{
+    bool SkipHeader { get; set; }
+    OutputFormat Output { get; set; } 
+    string Query { get; set; }
+}
+
+public class CostSettings : LogCommandSettings, ICostSettings
 {
     [CommandOption("-s|--subscription")]
-    [Description("The subscription id to use.")]
-    public Guid Subscription { get; set; }
+    [Description("The subscription id to use. Will try to fetch the active id if not specified.")]
+    public Guid? Subscription { get; set; }
+
+    [CommandOption("-g|--resource-group")]
+    [Description("The resource group to scope the request to. Need to be used in combination with the subscription id.")]
+    public string? ResourceGroup { get; set; }
+
+    [CommandOption("-b|--billing-account")]
+    [Description("The billing account id to use.")]
+    public int? BillingAccountId { get; set; }
+    
+    [CommandOption("-e|--enrollment-account")]
+    [Description("The enrollment account id to use.")]
+    public int? EnrollmentAccountId { get; set; }
 
     [CommandOption("-o|--output")] 
     [Description("The output format to use. Defaults to Console (Console, Json, JsonC, Text, Markdown, Csv)")]
@@ -38,4 +57,87 @@ public class CostSettings : LogCommandSettings
     [Description("Force the use of USD for the currency. Defaults to false to use the currency returned by the API.")]
     [DefaultValue(false)]
     public bool UseUSD { get; set; }
+    
+    [CommandOption("--skipHeader")]
+    [Description("Skip header creation for specific output formats. Useful when appending the output from multiple runs into one file. Defaults to false.")]
+    [DefaultValue(false)]
+    public bool SkipHeader { get; set; }
+
+    [CommandOption("--filter")]
+    [Description("Filter the output by the specified properties. Defaults to no filtering and can be multiple values.")]
+    public string[] Filter { get; set; } = Array.Empty<string>();
+
+    [CommandOption("-m|--metric")]
+    [Description("The metric to use for the costs. Defaults to ActualCost. (ActualCost, AmortizedCost)")]
+    [DefaultValue(MetricType.ActualCost)]
+    public MetricType Metric { get; set; } = MetricType.ActualCost;
+    
+
+    public Scope GetScope
+    {
+        get {
+            if ((Subscription==null || Subscription == Guid.Empty) && EnrollmentAccountId != null && BillingAccountId != null)
+            {
+                return Scope.EnrollmentAccount(BillingAccountId.Value, EnrollmentAccountId.Value);
+            }
+            else if (Subscription != null && !string.IsNullOrWhiteSpace(ResourceGroup))
+            {
+               return Scope.ResourceGroup(Subscription.Value, ResourceGroup);
+            }
+            else if (BillingAccountId.HasValue)
+            {
+                return Scope.BillingAccount(BillingAccountId.Value);
+            }
+            else // default to subscription
+            {
+                return Scope.Subscription(Subscription.GetValueOrDefault(Guid.Empty));
+            }
+        }
+    }
+    
+}
+
+/// <summary>
+/// The scope associated with query and export operations.
+/// This includes '/subscriptions/{subscriptionId}/' for subscription scope,
+/// '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}' for resourceGroup scope,
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}' for Billing Account scope and
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/departments/{departmentId}' for Department scope,
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/enrollmentAccounts/{enrollmentAccountId}' for EnrollmentAccount scope,
+/// '/providers/Microsoft.Management/managementGroups/{managementGroupId} for Management Group scope,
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/billingProfiles/{billingProfileId}' for billingProfile scope,
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/billingProfiles/{billingProfileId}/invoiceSections/{invoiceSectionId}' for invoiceSection scope, and
+/// '/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/customers/{customerId}' specific for partners.
+///
+/// Note; not all are implemented
+/// </summary>
+public  class Scope
+{
+    public static Scope Subscription(Guid subscriptionId) => new("Subscription", "/subscriptions/" + subscriptionId, true);
+    public static Scope ResourceGroup(Guid subscriptionId, string resourceGroup) => new("ResourceGroup", $"/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}", true);
+    public static Scope EnrollmentAccount(int billingAccountId, int enrollmentAccountId) => new("EnrollmentAccount", $"/providers/Microsoft.Billing/billingAccounts/{billingAccountId}/enrollmentAccounts/{enrollmentAccountId}", false);
+    public static Scope BillingAccount(int billingAccountId) => new("BillingAccount", $"/providers/Microsoft.Billing/billingAccounts/{billingAccountId}", false);
+    
+    private Scope(string name, string path, bool isSubscriptionBased)
+    {
+        Name = name;
+        ScopePath = path;
+        IsSubscriptionBased = isSubscriptionBased;
+    }
+    
+    public string Name { get; init; }
+    
+    public string ScopePath {
+        get;
+        init;
+    }
+
+    public bool IsSubscriptionBased { get; set; }
+}
+
+
+public enum MetricType
+{
+    ActualCost,
+    AmortizedCost
 }

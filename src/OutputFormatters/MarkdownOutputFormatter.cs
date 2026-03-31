@@ -1,8 +1,17 @@
 using System.Globalization;
+using System.Text;
+using AzureCostCli.Commands.AccumulatedCost;
+using AzureCostCli.Commands.Budgets;
+using AzureCostCli.Commands.CostByResource;
+using AzureCostCli.Commands.CostByTag;
+using AzureCostCli.Commands.DailyCost;
+using AzureCostCli.Commands.DetectAnomaly;
+using AzureCostCli.Commands.Regions;
+using AzureCostCli.Commands.WhatIf;
 using AzureCostCli.CostApi;
 using AzureCostCli.Infrastructure;
 
-namespace AzureCostCli.Commands.ShowCommand.OutputFormatters;
+namespace AzureCostCli.OutputFormatters;
 
 public class MarkdownOutputFormatter : BaseOutputFormatter
 {
@@ -103,7 +112,9 @@ public class MarkdownOutputFormatter : BaseOutputFormatter
         {
             Console.WriteLine($"|{cost.ItemName}|{(settings.UseUSD ? cost.CostUsd :cost.Cost):N2} {currency}|");
         }
-        
+
+      
+
         // Create a pie chart using mermaidjs
         Console.WriteLine();
         Console.WriteLine("```mermaid");
@@ -116,28 +127,58 @@ public class MarkdownOutputFormatter : BaseOutputFormatter
         }
         Console.WriteLine("```");
 
-        Console.WriteLine();
-        Console.WriteLine("## By Resource Group");
-        Console.WriteLine();
-        Console.WriteLine("|Resource Group|Amount|");
-        Console.WriteLine("|---|---:|");
-        foreach (var cost in accumulatedCostDetails.ByResourceGroupCosts.TrimList(threshold: settings.OthersCutoff))
+        if (accumulatedCostDetails.BySubscriptionCosts!=null &&settings.GetScope.Name.Equals("EnrollmentAccount", StringComparison.InvariantCultureIgnoreCase))
         {
-            Console.WriteLine($"|{cost.ItemName}|{(settings.UseUSD ? cost.CostUsd :cost.Cost):N2} {currency}|");
+            Console.WriteLine();
+            Console.WriteLine("## By Subscriptions");
+            Console.WriteLine();
+            Console.WriteLine("|Resource Group|Amount|");
+            Console.WriteLine("|---|---:|");
+            foreach (var cost in accumulatedCostDetails.BySubscriptionCosts.TrimList(threshold: settings.OthersCutoff))
+            {
+                Console.WriteLine($"|{cost.ItemName}|{(settings.UseUSD ? cost.CostUsd :cost.Cost):N2} {currency}|");
+            }
+
+            // Generate a pie chart using mermaidjs
+            Console.WriteLine();
+            Console.WriteLine("```mermaid");
+            Console.WriteLine("pie");
+            Console.WriteLine("   title Cost by Subscription");
+            foreach (var cost in accumulatedCostDetails.BySubscriptionCosts.TrimList(threshold: settings.OthersCutoff))
+            {
+                var name = string.IsNullOrWhiteSpace(cost.ItemName) ? "(Unknown)" : cost.ItemName;
+                Console.WriteLine($"   \"{name}\" : {(settings.UseUSD ? cost.CostUsd :cost.Cost).ToString("F2", culture)}");
+            }
+            Console.WriteLine("```");
         }
 
-        // Generate a pie chart using mermaidjs
-        Console.WriteLine();
-        Console.WriteLine("```mermaid");
-        Console.WriteLine("pie");
-        Console.WriteLine("   title Cost by resource group");
-        foreach (var cost in accumulatedCostDetails.ByResourceGroupCosts.TrimList(threshold: settings.OthersCutoff))
+        if (settings.GetScope.IsSubscriptionBased)
         {
-            var name = string.IsNullOrWhiteSpace(cost.ItemName) ? "(Unknown)" : cost.ItemName;
-            Console.WriteLine($"   \"{name}\" : {(settings.UseUSD ? cost.CostUsd :cost.Cost).ToString("F2", culture)}");
+            Console.WriteLine();
+            Console.WriteLine("## By Resource Group");
+            Console.WriteLine();
+            Console.WriteLine("|Resource Group|Amount|");
+            Console.WriteLine("|---|---:|");
+            foreach (var cost in accumulatedCostDetails.ByResourceGroupCosts.TrimList(threshold: settings.OthersCutoff))
+            {
+                Console.WriteLine($"|{cost.ItemName}|{(settings.UseUSD ? cost.CostUsd : cost.Cost):N2} {currency}|");
+            }
+
+            // Generate a pie chart using mermaidjs
+            Console.WriteLine();
+            Console.WriteLine("```mermaid");
+            Console.WriteLine("pie");
+            Console.WriteLine("   title Cost by resource group");
+            foreach (var cost in accumulatedCostDetails.ByResourceGroupCosts.TrimList(threshold: settings.OthersCutoff))
+            {
+                var name = string.IsNullOrWhiteSpace(cost.ItemName) ? "(Unknown)" : cost.ItemName;
+                Console.WriteLine(
+                    $"   \"{name}\" : {(settings.UseUSD ? cost.CostUsd : cost.Cost).ToString("F2", culture)}");
+            }
+
+            Console.WriteLine("```");
         }
-        Console.WriteLine("```");
-        
+
         Console.WriteLine();
         Console.WriteLine($"<sup>Generated at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} for subscription with id `{accumulatedCostDetails.Subscription.subscriptionId}`</sup>");
 
@@ -146,15 +187,194 @@ public class MarkdownOutputFormatter : BaseOutputFormatter
 
     public override Task WriteCostByResource(CostByResourceSettings settings, IEnumerable<CostResourceItem> resources)
     {
-        Console.WriteLine("# Azure Cost by Resource");
-        Console.WriteLine();
-        Console.WriteLine("| ResourceName | ResourceType | Location | ResourceGroupName | ServiceName | ServiceTier | Meter | Amount |");
-        Console.WriteLine("|---|---|---|---|---|---|---|---:|");
-        foreach (var cost in resources)
+
+        if (settings.ExcludeMeterDetails)
         {
-            Console.WriteLine($"|{cost.ResourceId.Split('/').Last()} | {cost.ResourceType} | {cost.ResourceLocation} | {cost.ResourceGroupName} |  {cost.ServiceName} | {cost.ServiceTier} | {cost.Meter} | {(settings.UseUSD ? cost.CostUSD :cost.Cost):N2} {(settings.UseUSD ? "USD" :cost.Currency)} |");
+            if (settings.SkipHeader == false)
+            {
+                Console.WriteLine("# Azure Cost by Resource");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "| ResourceName | ResourceType | Location | ResourceGroupName | Amount |");
+                Console.WriteLine("|---|---|---|---|---|---|---|---:|");
+            }
+
+            foreach (var cost in resources)
+            {
+                Console.WriteLine(
+                    $"|{cost.ResourceId.Split('/').Last()} | {cost.ResourceType} | {cost.ResourceLocation} | {cost.ResourceGroupName} | {(settings.UseUSD ? cost.CostUSD : cost.Cost):N2} {(settings.UseUSD ? "USD" : cost.Currency)} |");
+            }
         }
-        
+        else
+        {
+
+            if (settings.SkipHeader == false)
+            {
+                Console.WriteLine("# Azure Cost by Resource");
+                Console.WriteLine();
+                Console.WriteLine(
+                    "| ResourceName | ResourceType | Location | ResourceGroupName | ServiceName | ServiceTier | Meter | Amount |");
+                Console.WriteLine("|---|---|---|---|---|---|---|---:|");
+            }
+
+            foreach (var cost in resources)
+            {
+                Console.WriteLine(
+                    $"|{cost.ResourceId.Split('/').Last()} | {cost.ResourceType} | {cost.ResourceLocation} | {cost.ResourceGroupName} |  {cost.ServiceName} | {cost.ServiceTier} | {cost.Meter} | {(settings.UseUSD ? cost.CostUSD : cost.Cost):N2} {(settings.UseUSD ? "USD" : cost.Currency)} |");
+            }
+        }
+
         return Task.CompletedTask;
+    }
+
+    public override Task WriteBudgets(BudgetsSettings settings, IEnumerable<BudgetItem> budgets)
+    {
+        if (settings.SkipHeader == false)
+        {
+            Console.WriteLine(
+                $"# Azure Budgets for {settings.Subscription}");
+
+            Console.WriteLine();
+        }
+
+        foreach (var budget in budgets.OrderByDescending(a=>a.Name))
+        {
+            Console.WriteLine(
+                $"## Budget `{budget.Name}` ");
+            Console.WriteLine($"Has an amount of {budget.Amount:N2}");
+            Console.WriteLine($"The time grain is {budget.TimeGrain} and the time period is {budget.StartDate} to {budget.EndDate}");
+
+            Console.WriteLine();
+            
+            foreach (var notification in budget.Notifications)
+            {
+                Console.WriteLine(
+                    $"### Notification `{notification.Name}`");
+                Console.WriteLine($"This notification is {(notification.Enabled?"enabled":"disabled")} and when {notification.Operator} {notification.Threshold:N2} then contact:");
+                foreach (var email in notification.ContactEmails)
+                {
+                    Console.WriteLine($" - {email}");
+                }
+                
+                foreach (var role in notification.ContactRoles)
+                {
+                    Console.WriteLine($" - {role}");
+                }
+
+                foreach (var group in notification.ContactGroups)
+                {
+                    Console.WriteLine($" - {group}");
+                }
+            }
+
+            Console.WriteLine();
+        }
+
+        if (settings.SkipHeader == false)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                $"<sup>Generated at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} for subscription with id `{settings.Subscription}`</sup>");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public override Task WriteDailyCost(DailyCostSettings settings, IEnumerable<CostDailyItem> dailyCosts)
+    {
+       
+        var currency = settings.UseUSD ? "USD" : dailyCosts.First().Currency;
+
+        var markdown = new StringBuilder();
+
+        markdown.AppendLine("# Daily Costs\n");
+
+// Markdown table header
+        markdown.AppendLine($"| Date | Cost ({currency}) | Breakdown |");
+        markdown.AppendLine("|------|----------------|-----------|");
+
+        foreach (var day in dailyCosts.GroupBy(a => a.Date).OrderBy(a => a.Key))
+        {
+            var topCosts = day.OrderByDescending(item => settings.UseUSD ? item.CostUsd : item.Cost)
+                .Take(settings.OthersCutoff).ToList();
+
+            var othersCost = day.Except(topCosts)
+                .Sum(item => settings.UseUSD ? item.CostUsd : item.Cost);
+
+            topCosts.Add(new CostDailyItem(day.Key, "Other", othersCost, othersCost, day.First().Currency));
+
+            var dailyCost = 0D; // Keep track of the total cost for this day
+            var breakdown = new List<string>();
+
+            foreach (var item in topCosts)
+            {
+                var itemCost = settings.UseUSD ? item.CostUsd : item.Cost;
+                dailyCost += itemCost;
+                var percentage = (itemCost / day.Sum(i => settings.UseUSD ? i.CostUsd : i.Cost)) * 100;
+                breakdown.Add($"**{item.Name}**: `{itemCost.ToString("F2")}` (_{percentage.ToString("F2")}%_)");
+            }
+
+            // Markdown table row
+            markdown.AppendLine($"| **{day.Key.ToString("yyyy-MM-dd")}** | **{dailyCost.ToString("F2")}** | {string.Join(", ", breakdown)} |");
+        }
+
+// Output markdown
+        Console.WriteLine(markdown.ToString());
+
+        if (settings.SkipHeader == false)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                $"<sup>Generated at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} for subscription with id `{settings.Subscription}`</sup>");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public override Task WriteAnomalyDetectionResults(DetectAnomalySettings settings, List<AnomalyDetectionResult> anomalies)
+    {
+        if (settings.SkipHeader == false)
+        {
+            Console.WriteLine("# Anomaly Detection Results");
+            Console.WriteLine();
+        }
+
+        foreach (var dimension in anomalies.GroupBy(a=>a.Name))
+        {
+            Console.WriteLine($"## {settings.Dimension}: {dimension.Key}");
+            Console.WriteLine();
+            Console.WriteLine("| Anomaly Type | Message |");
+            Console.WriteLine("|---|---|");
+            foreach (var anomaly in dimension)
+            {
+                Console.WriteLine($"|{anomaly.AnomalyType}| {anomaly.Message}|");
+            }
+
+            Console.WriteLine();
+        }
+
+        if (settings.SkipHeader == false)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                $"<sup>Generated at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} for subscription with id `{settings.Subscription}`</sup>");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public override Task WriteRegions(RegionsSettings settings, IReadOnlyCollection<AzureRegion> regions)
+    {
+        throw new NotImplementedException();
+    }
+
+    public override Task WriteCostByTag(CostByTagSettings settings, Dictionary<string, Dictionary<string, List<CostResourceItem>>> byTags)
+    {
+        throw new NotImplementedException();
+    }
+
+    public override Task WritePricesPerRegion(WhatIfSettings settings, Dictionary<UsageDetails, List<PriceRecord>> pricesByRegion)
+    {
+        throw new NotImplementedException();
     }
 }
